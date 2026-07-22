@@ -1,0 +1,11 @@
+# Packaging metadata for the `fyne` tool. The values the running application
+# uses are set with app.SetMetadata in main.go; keep the two in sync.
+[Details]
+  Icon = ""
+  Name = "TradeMan"
+  ID = "com.github.dmitrykvasnikov.trademan"
+  Version = "0.0.1"
+  Build = 1
+
+[Migrations]
+  fyneDo = true
