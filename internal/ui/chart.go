@@ -23,6 +23,12 @@ type chartArea struct {
 	card    *widget.Card
 	message *widget.Label
 	chart   *candleChart
+
+	// subtitle is the data line under the title — last price, candle count,
+	// update time; note is the signal status shown beside it. They are kept
+	// apart so a signal can update its half without redrawing the other.
+	subtitle string
+	note     string
 }
 
 func newChartArea() *chartArea {
@@ -64,12 +70,31 @@ func (c *chartArea) show(title string, candles []binance.Candle) {
 
 	last := candles[len(candles)-1]
 	c.card.SetTitle(title)
-	c.card.SetSubTitle(fmt.Sprintf("last %s · %d candles · updated %s",
-		formatPrice(last.Close), len(candles), time.Now().Format("15:04:05")))
+	c.subtitle = fmt.Sprintf("last %s · %d candles · updated %s",
+		formatPrice(last.Close), len(candles), time.Now().Format("15:04:05"))
 
 	c.chart.setCandles(candles)
 	c.message.Hide()
 	c.chart.Show()
+	c.render()
+}
+
+// setNote records the signal status shown beside the data line and repaints the
+// subtitle. It tells a chart with no matches apart from a keystroke that never
+// landed. An empty note removes it.
+func (c *chartArea) setNote(note string) {
+	c.note = note
+	c.render()
+}
+
+// render composes the card subtitle from the data line and, when a chart is on
+// screen, the active signal's note beside it.
+func (c *chartArea) render() {
+	subtitle := c.subtitle
+	if c.note != "" && c.chart.Visible() {
+		subtitle += " · " + c.note
+	}
+	c.card.SetSubTitle(subtitle)
 }
 
 // fail reports a request that did not come back. A chart already on screen is
@@ -77,7 +102,8 @@ func (c *chartArea) show(title string, candles []binance.Candle) {
 // and old candles with a warning on them beat an empty panel.
 func (c *chartArea) fail(title string, err error) {
 	if c.chart.Visible() {
-		c.card.SetSubTitle("not updating — " + err.Error())
+		c.subtitle = "not updating — " + err.Error()
+		c.render()
 		return
 	}
 	c.say(title, "Could not load "+title+" — "+err.Error())
@@ -88,9 +114,10 @@ func (c *chartArea) fail(title string, err error) {
 // alongside would only say the same thing twice.
 func (c *chartArea) say(title, message string) {
 	c.card.SetTitle(title)
-	c.card.SetSubTitle("")
+	c.subtitle, c.note = "", ""
 
 	c.message.SetText(message)
 	c.chart.Hide()
 	c.message.Show()
+	c.render()
 }

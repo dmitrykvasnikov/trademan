@@ -173,6 +173,70 @@ func TestRepeatedShortcutRaisesOneDialog(t *testing.T) {
 	}
 }
 
+// 'r' and 'u' run and clear the signal on whichever tab is focused.
+func TestSignalKeysActOnTheFocusedTab(t *testing.T) {
+	m := newTestWindow(t)
+	press(t, m, fyne.KeyT)
+
+	view := m.tabs.active()
+	if view == nil {
+		t.Fatal("Ctrl-T did not leave a tab to act on")
+	}
+	view.drawn = gappyCandles()
+
+	test.TypeOnCanvas(m.win.Canvas(), "r")
+	if !view.signalOn {
+		t.Error("'r' did not run the signal on the focused tab")
+	}
+	if got := view.chart.chart.marks; !reflect.DeepEqual(got, []int{3, 7}) {
+		t.Errorf("'r' marked %v, want the gap-completing candles 3 and 7", got)
+	}
+
+	test.TypeOnCanvas(m.win.Canvas(), "u")
+	if view.signalOn {
+		t.Error("'u' did not clear the signal")
+	}
+	if view.chart.chart.marks != nil {
+		t.Error("'u' left marks on the chart")
+	}
+}
+
+// 'r' and 'u' with no tab open are a no-op, not a crash.
+func TestSignalKeysWithoutATabDoNothing(t *testing.T) {
+	m := newTestWindow(t)
+
+	test.TypeOnCanvas(m.win.Canvas(), "r")
+	test.TypeOnCanvas(m.win.Canvas(), "u")
+}
+
+// A dropdown grabs focus when used and then swallows plain runes, so picking a
+// value has to hand focus back — otherwise 'r', 'u' and 'q' stop reaching the
+// canvas the moment a chart is set up. This is what made pressing 'r' on a live
+// chart do nothing.
+func TestSelectingReturnsFocusToTheCanvas(t *testing.T) {
+	m := newTestWindow(t)
+	press(t, m, fyne.KeyT)
+	view := m.tabs.active()
+
+	// returnFocus reaches the canvas through the coin dropdown; check the same
+	// one, so the test and the code agree on which canvas is in play.
+	canvas := m.app.Driver().CanvasForObject(view.coin)
+	if canvas == nil {
+		t.Skip("the tab's widgets are not attached to a canvas in this setup")
+	}
+
+	canvas.Focus(view.interval) // as tapping the dropdown would
+	if canvas.Focused() == nil {
+		t.Skip("this canvas does not track focus")
+	}
+
+	view.interval.SetSelected("1h") // completes a selection: reload → returnFocus
+
+	if got := canvas.Focused(); got != nil {
+		t.Errorf("a dropdown (%T) kept focus after a selection; bare keys would be swallowed", got)
+	}
+}
+
 func TestQuitKeyAsksFirst(t *testing.T) {
 	m := newTestWindow(t)
 

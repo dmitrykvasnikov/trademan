@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -10,10 +11,15 @@ import (
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/dmitrykvasnikov/trademan/internal/binance"
+	"github.com/dmitrykvasnikov/trademan/internal/signal"
 )
 
 // emptySelection is what a dropdown shows before anything is picked in it.
 const emptySelection = "-"
+
+// fvg is the built-in signal the 'r' key runs. It is parsed once and shared by
+// every tab, since it never changes.
+var fvg = signal.FVG()
 
 // tabView is the content of a single tab: the three chart selectors in a row on
 // top, and the chart area filling everything below them. It also owns the feed
@@ -31,6 +37,15 @@ type tabView struct {
 
 	// symbols backs the Coin dropdown; the selected index points into it.
 	symbols []binance.Symbol
+
+	// drawn is the candle set currently on screen, kept so a signal can be run
+	// over it — and re-run as it refreshes — without asking the exchange again.
+	drawn []binance.Candle
+
+	// signalOn is whether the FVG signal is marking this chart. It survives a
+	// refresh, so a live chart keeps marking its newest candles until 'u' clears
+	// it.
+	signalOn bool
 
 	// stop ends the feed currently drawing into the chart, if there is one.
 	stop context.CancelFunc
@@ -95,14 +110,61 @@ func (v *tabView) setSymbols(symbols []binance.Symbol) {
 	v.coin.SetOptions(labels)
 }
 
+// runSignal starts the FVG signal on this tab and marks the candles already on
+// screen; clearSignal stops it and clears the marks. Both are driven by the 'r'
+// and 'u' keys. Once started the signal stays on, so applyMarks re-runs it on
+// every redraw and the marks follow the live chart.
+func (v *tabView) runSignal()   { v.signalOn = true; v.applyMarks() }
+func (v *tabView) clearSignal() { v.signalOn = false; v.applyMarks() }
+
+// applyMarks keeps the signal in step with whatever the chart is showing. It
+// re-runs FVG over the candles currently on screen rather than remembering where
+// the gaps were, so the marks follow every change to the chart — a new candle
+// arriving, a different timeframe, a new candle count or coin — and it runs after
+// each redraw and whenever the signal is toggled. Nothing is marked while the
+// signal is off.
+func (v *tabView) applyMarks() {
+	if !v.signalOn {
+		v.chart.chart.setMarks(nil)
+		v.chart.setNote("")
+		return
+	}
+	marks := fvg.Marks(v.drawn)
+	v.chart.chart.setMarks(marks)
+	v.chart.setNote(v.signalNote(len(marks)))
+}
+
+// signalNote labels the running signal for the chart heading. It names the
+// timeframe the signal is computed on, so switching interval is visible in the
+// heading as well as in the marks.
+func (v *tabView) signalNote(marks int) string {
+	if tf := v.interval.Selected; tf != "" {
+		return fmt.Sprintf("FVG · %s · %d marks", tf, marks)
+	}
+	return fmt.Sprintf("FVG · %d marks", marks)
+}
+
+// returnFocus hands keyboard focus back to the window after a dropdown takes it.
+// A widget.Select grabs focus when tapped and then swallows plain runes, so
+// without this the bare 'r', 'u' and 'q' keys — which only reach the canvas
+// while nothing is focused — would stop working the moment a chart is set up.
+func (v *tabView) returnFocus() {
+	if c := fyne.CurrentApp().Driver().CanvasForObject(v.coin); c != nil {
+		c.Unfocus()
+	}
+}
+
 // reload restarts the chart after a dropdown changes: the running feed is
 // stopped, and a new one starts only once all three selections are filled in.
 func (v *tabView) reload() {
 	v.close()
+	v.drawn = nil
+	v.returnFocus()
 
 	f, ok := v.selection()
 	if !ok {
 		v.chart.clear()
+		v.chart.chart.setMarks(nil)
 		v.onTitle(newTabTitle)
 		return
 	}
@@ -166,7 +228,9 @@ func (v *tabView) draw(ctx context.Context, f feed) {
 			v.chart.fail(f.title(), err)
 			return
 		}
+		v.drawn = candles
 		v.chart.show(f.title(), candles)
+		v.applyMarks()
 	})
 }
 

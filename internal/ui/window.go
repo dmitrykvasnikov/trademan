@@ -79,10 +79,19 @@ func (m *MainWindow) bindKeys() {
 	canvas := m.win.Canvas()
 
 	// Runes only reach the canvas when no widget holds focus, so typing into a
-	// dropdown can never quit the application by accident.
+	// dropdown can never quit the application or fire a signal by accident.
 	canvas.SetOnTypedRune(func(r rune) {
-		if r == 'q' || r == 'Q' {
+		switch r {
+		case 'q', 'Q':
 			m.confirmQuit()
+		case 'r', 'R':
+			if v := m.tabs.active(); v != nil {
+				v.runSignal()
+			}
+		case 'u', 'U':
+			if v := m.tabs.active(); v != nil {
+				v.clearSignal()
+			}
 		}
 	})
 

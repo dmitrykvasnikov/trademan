@@ -65,6 +65,12 @@ func (t *tabManager) selected() *container.TabItem {
 	return t.docs.Selected()
 }
 
+// active returns the focused tab's contents, or nil while no tab is open. It is
+// how the 'r' and 'u' keys reach the chart they should act on.
+func (t *tabManager) active() *tabView {
+	return t.views[t.selected()]
+}
+
 // close removes tab and focuses the one that takes its place: the next tab, or
 // the previous one when the closed tab was the last.
 func (t *tabManager) close(tab *container.TabItem) {

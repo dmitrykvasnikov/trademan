@@ -35,6 +35,8 @@ type candleChart struct {
 	widget.BaseWidget
 
 	candles []binance.Candle
+	// marks are the indices of candles a signal fired on; each is circled.
+	marks []int
 }
 
 func newCandleChart() *candleChart {
@@ -46,6 +48,13 @@ func newCandleChart() *candleChart {
 // setCandles replaces what the chart shows and redraws it.
 func (c *candleChart) setCandles(candles []binance.Candle) {
 	c.candles = candles
+	c.Refresh()
+}
+
+// setMarks circles the given candles — the ones a signal fired on — and redraws.
+// Passing nil clears the marks.
+func (c *candleChart) setMarks(marks []int) {
+	c.marks = marks
 	c.Refresh()
 }
 
@@ -67,6 +76,7 @@ type candleChartRenderer struct {
 	times   []*canvas.Text      // the time at each column, on the bottom axis
 	wicks   []*canvas.Line      // the high-to-low range of each candle
 	bodies  []*canvas.Rectangle // the open-to-close range of each candle
+	marks   []*canvas.Circle    // a ring around each candle a signal fired on
 	mark    *canvas.Line        // the latest close, drawn across the plot
 	markTag *canvas.Text        // and its price, on the right axis
 
@@ -99,6 +109,11 @@ func (r *candleChartRenderer) build() {
 	r.times = fit(r.times, timeTicks, func() *canvas.Text { return axisLabel(fyne.TextAlignCenter) })
 	r.wicks = fit(r.wicks, len(candles), func() *canvas.Line { return canvas.NewLine(ink.up) })
 	r.bodies = fit(r.bodies, len(candles), func() *canvas.Rectangle { return canvas.NewRectangle(ink.up) })
+	r.marks = fit(r.marks, len(r.chart.marks), func() *canvas.Circle {
+		ring := canvas.NewCircle(color.Transparent)
+		ring.StrokeWidth = 2
+		return ring
+	})
 
 	if r.mark == nil {
 		r.mark = canvas.NewLine(ink.mark)
@@ -126,6 +141,9 @@ func (r *candleChartRenderer) build() {
 		r.wicks[i].StrokeColor = colour
 		r.bodies[i].FillColor = colour
 	}
+	for _, ring := range r.marks {
+		ring.StrokeColor = ink.mark
+	}
 
 	// An empty chart draws nothing at all: the area shows a message instead.
 	if len(candles) == 0 {
@@ -142,6 +160,10 @@ func (r *candleChartRenderer) build() {
 	}
 	for i := range candles {
 		r.objects = append(r.objects, r.wicks[i], r.bodies[i])
+	}
+	// Rings sit above the candles they enclose so a signal reads clearly.
+	for _, ring := range r.marks {
+		r.objects = append(r.objects, ring)
 	}
 	r.objects = append(r.objects, r.mark, r.markTag)
 	for _, text := range r.prices {
@@ -173,7 +195,32 @@ func (r *candleChartRenderer) Layout(size fyne.Size) {
 	r.layoutPriceAxis(s)
 	r.layoutTimeAxis(s, candles)
 	r.layoutCandles(s, candles)
+	r.layoutMarks(s, candles)
 	r.layoutMark(s, candles[len(candles)-1].Close)
+}
+
+// layoutMarks rings each candle a signal fired on. The ring is centred on the
+// candle's midpoint and widens with the space each candle has, down to a floor
+// so it stays visible when 500 candles are packed in, and up to a ceiling so it
+// does not swallow the chart when only a few are.
+func (r *candleChartRenderer) layoutMarks(s scale, candles []binance.Candle) {
+	radius := clamp(s.slot()*0.9, 8, 22)
+
+	for i, index := range r.chart.marks {
+		ring := r.marks[i]
+		// A mark left over from a longer chart must not be drawn onto a candle
+		// that no longer exists; park it off any candle instead.
+		if index < 0 || index >= len(candles) {
+			ring.Position1, ring.Position2 = fyne.NewPos(0, 0), fyne.NewPos(0, 0)
+			continue
+		}
+
+		candle := candles[index]
+		x := s.x(index)
+		y := s.y((candle.High + candle.Low) / 2)
+		ring.Position1 = fyne.NewPos(x-radius, y-radius)
+		ring.Position2 = fyne.NewPos(x+radius, y+radius)
+	}
 }
 
 // layoutPriceAxis spreads the grid rows evenly over the price range and prints

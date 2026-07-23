@@ -61,6 +61,36 @@ func TestChartAreaShowsCandlesAndDatesThem(t *testing.T) {
 	}
 }
 
+// A running signal shows its status beside the data line, so a chart with no
+// matches is not mistaken for a keystroke that never landed.
+func TestChartAreaShowsTheSignalNoteBesideTheData(t *testing.T) {
+	area := newTestChartArea(t)
+	area.show("BTC/USDT · 1h", candles(20))
+
+	area.setNote("FVG signal · 2 marks")
+
+	if got := area.card.Subtitle; !strings.Contains(got, "20 candles") || !strings.Contains(got, "FVG signal · 2 marks") {
+		t.Errorf("the subtitle is %q, want both the data line and the signal note", got)
+	}
+
+	area.clear()
+	if strings.Contains(area.card.Subtitle, "FVG") {
+		t.Errorf("the cleared subtitle %q still carries the signal note", area.card.Subtitle)
+	}
+}
+
+// A note with no chart on screen has nothing to annotate and must not leave a
+// stray subtitle under the placeholder.
+func TestChartAreaHidesTheNoteWithoutAChart(t *testing.T) {
+	area := newTestChartArea(t)
+
+	area.setNote("FVG signal · 0 marks")
+
+	if area.card.Subtitle != "" {
+		t.Errorf("a signal note showed with no chart on screen: subtitle %q", area.card.Subtitle)
+	}
+}
+
 // Candles cannot be plotted without candles; an empty set must leave whatever
 // is on screen alone rather than blanking the chart.
 func TestChartAreaIgnoresAnEmptySet(t *testing.T) {

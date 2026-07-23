@@ -65,6 +65,41 @@ func failingServer(t *testing.T, message string) *binance.Client {
 	return &binance.Client{BaseURL: server.URL, HTTP: server.Client()}
 }
 
+// candleServer serves a fixed, hand-built set of candles for every request — a
+// gappy series, say — and a client pointed at it, for the tests that need the
+// signal to find something specific after a refresh.
+func candleServer(t *testing.T, candles []binance.Candle) *binance.Client {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, candlesJSON(candles))
+	}))
+	t.Cleanup(server.Close)
+
+	return &binance.Client{BaseURL: server.URL, HTTP: server.Client()}
+}
+
+// candlesJSON renders a given series in Binance's mixed-array kline encoding, so
+// a server can hand back exactly the candles a test built rather than the plain
+// rising run klinesJSON makes.
+func candlesJSON(candles []binance.Candle) string {
+	var b strings.Builder
+	b.WriteByte('[')
+
+	for i, c := range candles {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		open := int64(i) * 60_000
+		fmt.Fprintf(&b, `[%d,"%g","%g","%g","%g","1.5",%d,"150.0",3,"0.5","50.0","0"]`,
+			open, c.Open, c.High, c.Low, c.Close, open+59_999)
+	}
+
+	b.WriteByte(']')
+	return b.String()
+}
+
 // klinesJSON renders n candles in Binance's mixed-array kline encoding.
 func klinesJSON(n int) string {
 	var b strings.Builder
@@ -81,6 +116,24 @@ func klinesJSON(n int) string {
 
 	b.WriteByte(']')
 	return b.String()
+}
+
+// gappyCandles is a candle series holding two separated fair-value gaps: one
+// jump clear of the run at candle 3 and another at candle 7. FVG marks each gap
+// once — indices 3 and 7 — skipping the body it just used, so the marks do not
+// overlap.
+func gappyCandles() []binance.Candle {
+	return []binance.Candle{
+		{Open: 15, High: 20, Low: 10, Close: 15},
+		{Open: 16, High: 21, Low: 11, Close: 16},
+		{Open: 17, High: 22, Low: 12, Close: 17},
+		{Open: 35, High: 40, Low: 30, Close: 35}, // first gap completes here (index 3)
+		{Open: 36, High: 41, Low: 31, Close: 36},
+		{Open: 37, High: 42, Low: 32, Close: 37},
+		{Open: 38, High: 43, Low: 33, Close: 38},
+		{Open: 65, High: 70, Low: 60, Close: 65}, // second gap completes here (index 7)
+		{Open: 66, High: 71, Low: 61, Close: 66},
+	}
 }
 
 // candles builds n candles directly, for the drawing tests that do not need a

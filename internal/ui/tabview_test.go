@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -264,6 +265,128 @@ func TestRefreshPeriodFollowsTheInterval(t *testing.T) {
 		if got := refreshPeriod(interval); got != want {
 			t.Errorf("a %s chart refreshes every %v, want %v", interval, got, want)
 		}
+	}
+}
+
+// 'r' runs the FVG signal over the candles on screen and circles the ones that
+// complete a gap.
+func TestRunSignalMarksTheGaps(t *testing.T) {
+	view, _ := newTestTab(t, offlineClient())
+	view.drawn = gappyCandles()
+
+	view.runSignal()
+
+	if !view.signalOn {
+		t.Error("running the signal did not turn it on")
+	}
+	if got := view.chart.chart.marks; !reflect.DeepEqual(got, []int{3, 7}) {
+		t.Errorf("the signal marked candles %v, want the gap-completing 3 and 7", got)
+	}
+}
+
+// 'u' turns the signal off and takes its marks with it.
+func TestClearSignalRemovesTheMarks(t *testing.T) {
+	view, _ := newTestTab(t, offlineClient())
+	view.drawn = gappyCandles()
+	view.runSignal()
+
+	view.clearSignal()
+
+	if view.signalOn {
+		t.Error("clearing the signal left it on")
+	}
+	if got := view.chart.chart.marks; got != nil {
+		t.Errorf("clearing the signal left marks %v, want none", got)
+	}
+}
+
+// A signal left on keeps marking as fresh candles arrive, so a live chart does
+// not go blank after the first draw.
+func TestSignalReMarksThePicksUpNewCandles(t *testing.T) {
+	view, _ := newTestTab(t, offlineClient())
+
+	view.runSignal() // on, but nothing is on screen yet
+	if got := len(view.chart.chart.marks); got != 0 {
+		t.Errorf("the signal marked %d candles with none on screen, want 0", got)
+	}
+
+	view.drawn = gappyCandles()
+	view.applyMarks() // stands in for the next refresh drawing new candles
+
+	if got := view.chart.chart.marks; !reflect.DeepEqual(got, []int{3, 7}) {
+		t.Errorf("after new candles the signal marks %v, want 3 and 7", got)
+	}
+}
+
+// A running signal follows a change of timeframe: the new candles are scanned,
+// not left with the marks from the old interval.
+func TestSignalUpdatesWhenTheTimeframeChanges(t *testing.T) {
+	view, _ := newTestTab(t, candleServer(t, gappyCandles()))
+	selectAll(view, "BTC/USDT", "1h", "100")
+	view.runSignal()
+
+	view.interval.SetSelected("5m") // still a complete selection: the feed relaunches
+	f, ok := view.selection()
+	if !ok {
+		t.Fatal("switching the timeframe left an incomplete selection")
+	}
+	view.draw(context.Background(), f) // the relaunched feed's first draw
+
+	if !view.signalOn {
+		t.Error("switching the timeframe turned the signal off")
+	}
+	if got := view.chart.chart.marks; !reflect.DeepEqual(got, []int{3, 7}) {
+		t.Errorf("after switching timeframe the signal marked %v, want 3 and 7", got)
+	}
+}
+
+// It follows a change of candle count the same way.
+func TestSignalUpdatesWhenTheCandleCountChanges(t *testing.T) {
+	view, _ := newTestTab(t, candleServer(t, gappyCandles()))
+	selectAll(view, "BTC/USDT", "1h", "100")
+	view.runSignal()
+
+	view.candles.SetSelected("300")
+	f, _ := view.selection()
+	view.draw(context.Background(), f)
+
+	if got := view.chart.chart.marks; !reflect.DeepEqual(got, []int{3, 7}) {
+		t.Errorf("after changing the candle count the signal marked %v, want 3 and 7", got)
+	}
+}
+
+// A live chart re-reads its candles each tick; when a new one arrives the set
+// shifts, and the signal re-marks the shifted set instead of pointing at where
+// the gaps used to be.
+func TestSignalFollowsTheLiveCandles(t *testing.T) {
+	view, _ := newTestTab(t, offlineClient())
+	view.signalOn = true
+
+	view.drawn = gappyCandles()
+	view.applyMarks()
+	if got := view.chart.chart.marks; !reflect.DeepEqual(got, []int{3, 7}) {
+		t.Fatalf("the first frame marked %v, want 3 and 7", got)
+	}
+
+	// The oldest candle drops off the front, so every gap shifts one to the left.
+	view.drawn = gappyCandles()[1:]
+	view.applyMarks()
+	if got := view.chart.chart.marks; !reflect.DeepEqual(got, []int{2, 6}) {
+		t.Errorf("after the set shifted the marks are %v, want them at 2 and 6", got)
+	}
+}
+
+// Changing a dropdown drops the marks along with the candles they sat on, so a
+// stale mark cannot survive onto a different chart.
+func TestReloadClearsTheMarks(t *testing.T) {
+	view, _ := newTestTab(t, offlineClient())
+	view.drawn = gappyCandles()
+	view.runSignal()
+
+	view.interval.SetSelected("1h") // an incomplete selection retires the chart
+
+	if got := view.chart.chart.marks; got != nil {
+		t.Errorf("changing a dropdown left marks %v on screen, want none", got)
 	}
 }
 

@@ -267,6 +267,53 @@ func TestChartMarksTheLatestClose(t *testing.T) {
 	}
 }
 
+func TestChartRingsEveryMarkedCandle(t *testing.T) {
+	chart, renderer := newTestChart(t, candles(10))
+
+	chart.setMarks([]int{2, 5})
+
+	if got := len(renderer.marks); got != 2 {
+		t.Fatalf("the chart holds %d rings, want one per mark (2)", got)
+	}
+
+	rings := 0
+	for _, object := range renderer.Objects() {
+		if _, ok := object.(*canvas.Circle); ok {
+			rings++
+		}
+	}
+	if rings != 2 {
+		t.Errorf("the chart drew %d rings, want the 2 marks", rings)
+	}
+	if r := renderer.marks[0]; r.Position2.X <= r.Position1.X || r.Position2.Y <= r.Position1.Y {
+		t.Error("a ring around a visible candle was laid out with no area")
+	}
+}
+
+// A mark left over from a longer chart must not be drawn onto a candle that is
+// no longer there.
+func TestChartParksMarksBeyondItsCandles(t *testing.T) {
+	chart, renderer := newTestChart(t, candles(10))
+
+	chart.setMarks([]int{15})
+
+	if r := renderer.marks[0]; r.Position1 != r.Position2 {
+		t.Errorf("a mark on a candle that does not exist was drawn at %v–%v", r.Position1, r.Position2)
+	}
+}
+
+// Clearing the marks has to leave a chart with none, not keep the last set.
+func TestChartClearsItsMarks(t *testing.T) {
+	chart, renderer := newTestChart(t, candles(10))
+	chart.setMarks([]int{2, 5})
+
+	chart.setMarks(nil)
+
+	if got := len(renderer.marks); got != 0 {
+		t.Errorf("the chart kept %d rings after its marks were cleared, want 0", got)
+	}
+}
+
 // An empty chart draws nothing at all; the area around it shows a message.
 func TestChartWithoutCandlesDrawsNothing(t *testing.T) {
 	_, renderer := newTestChart(t, nil)
